@@ -21,7 +21,50 @@
 #include "config.h"
 #endif
 
+#define WITH_DEBUG_MULTITRANSPORT
+
 #include "multitransport.h"
+#include "rdpudp.h"
+
+static BOOL multitransport_send_initiate_error(
+	rdpMultitransport* multitransport,
+	UINT32 requestId,
+	UINT32 hrResponse
+)
+{
+	rdpRdp* rdp;
+	wStream* s;
+
+	rdp = multitransport->rdp;
+
+	/* Send the response PDU to the server */
+	s = rdp_message_channel_pdu_init(rdp);
+	if (s == NULL) return FALSE;
+
+	DEBUG_AUTODETECT("sending initiate error PDU");
+
+	Stream_Write_UINT32(s, requestId); /* requestId (4 bytes) */
+	Stream_Write_UINT32(s, hrResponse); /* hrResponse (4 bytes) */
+
+	return rdp_send_message_channel_pdu(rdp, s, SEC_TRANSPORT_RSP);
+}
+
+static BOOL multitransport_recv_initiate_request(
+	rdpMultitransport* multitransport,
+	UINT32 requestId,
+	UINT16 requestedProtocol,
+	BYTE* securityCookie
+)
+{
+	rdpUdp* rdpudp;
+
+	DEBUG_MULTITRANSPORT("requestId=%x, requestedProtocol=%x", requestId, requestedProtocol);
+
+	rdpudp = rdpudp_new(multitransport->rdp);
+	if (rdpudp == NULL) return FALSE;
+
+	return rdpudp_init(rdpudp, requestId, requestedProtocol, securityCookie);
+}
 
 int rdp_recv_multitransport_packet(rdpRdp* rdp, wStream* s)
 {
@@ -38,15 +81,19 @@ int rdp_recv_multitransport_packet(rdpRdp* rdp, wStream* s)
 	Stream_Read_UINT16(s, reserved); /* reserved (2 bytes) */
 	Stream_Read(s, securityCookie, 16); /* securityCookie (16 bytes) */
 
+	multitransport_recv_initiate_request(rdp->multitransport, requestId, requestedProtocol, securityCookie);
+
 	return 0;
 }
 
-rdpMultitransport* multitransport_new(void)
+rdpMultitransport* multitransport_new(rdpRdp* rdp)
 {
 	rdpMultitransport* multitransport = (rdpMultitransport*)malloc(sizeof(rdpMultitransport));
 	if (multitransport)
 	{
 		memset(multitransport, 0, sizeof(rdpMultitransport));
+
+		multitransport->rdp = rdp;
 	}
 	
 	return multitransport;
@@ -54,5 +101,7 @@ rdpMultitransport* multitransport_new(void)
 
 void multitransport_free(rdpMultitransport* multitransport)
 {
+	if (multitransport == NULL) return;
+
 	free(multitransport);
 }

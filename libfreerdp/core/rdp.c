@@ -1229,7 +1229,7 @@ rdpRdp* rdp_new(rdpContext* context)
 		rdp->redirection = redirection_new();
 		rdp->autodetect = autodetect_new();
 		rdp->heartbeat = heartbeat_new();
-		rdp->multitransport = multitransport_new();
+		rdp->multitransport = multitransport_new(rdp);
 		rdp->mppc_dec = mppc_dec_new();
 		rdp->mppc_enc = mppc_enc_new(PROTO_RDP_50);
 	}

@@ -30,12 +30,18 @@ typedef struct rdp_multitransport rdpMultitransport;
 
 struct rdp_multitransport
 {
-	UINT32 placeholder;
+	rdpRdp* rdp;
 };
 
 int rdp_recv_multitransport_packet(rdpRdp* rdp, wStream* s);
 
-rdpMultitransport* multitransport_new(void);
+rdpMultitransport* multitransport_new(rdpRdp* rdp);
 void multitransport_free(rdpMultitransport* multitransport);
+
+#ifdef WITH_DEBUG_MULTITRANSPORT
+#define DEBUG_MULTITRANSPORT(fmt, ...) DEBUG_CLASS(MULTITRANSPORT, fmt, ## __VA_ARGS__)
+#else
+#define DEBUG_MULTITRANSPORT(fmt, ...) DEBUG_NULL(fmt, ## __VA_ARGS__)
+#endif
 
 #endif /* __MULTITRANSPORT_H */
