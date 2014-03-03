@@ -25,7 +25,6 @@
 
 #include <ctype.h>
 
-#include "rdpudp.h"
 #include "multitransport.h"
 
 #define RDPUDP_MTU_SIZE				1232
@@ -37,15 +36,13 @@
 #define RDPUDP_STATE_DISCONNECTED	0
 #define RDPUDP_STATE_CONNECTING		1
 #define RDPUDP_STATE_CONNECTED		2
-#define RDPUDP_STATE_SECURED		3
+#define RDPUDP_STATE_SECURING		3
+#define RDPUDP_STATE_SECURED		4
 
 #define DATAGRAM_RECEIVED			0
 #define DATAGRAM_RESERVED_1			1
 #define DATAGRAM_RESERVED_2			2
 #define DATAGRAM_NOT_YET_RECEIVED	3
-
-#define RDPUDP_PROTOCOL_UDPFECR		0x01
-#define RDPUDP_PROTOCOL_UDPFECL		0x02
 
 #define RDPUDP_FLAG_SYN				0x0001
 #define RDPUDP_FLAG_FIN				0x0002
@@ -74,15 +71,13 @@
  * RDPUDP_ACK_VECTOR_HEADER (2.2.2.7)
  * RDPUDP_CORRELATION_ID_PAYLOAD (2.2.2.8)
  */
-typedef struct
-{
+typedef struct {
 	UINT32 snSourceAck;
 	UINT16 uReceiveWindowSize;
 	UINT16 uFlags;
 } RDPUDP_FEC_HEADER;
 
-typedef struct
-{
+typedef struct {
 	UINT32 snCoded;
 	UINT32 snSourceStart;
 	UINT16 uSourceRange;
@@ -90,42 +85,35 @@ typedef struct
 	UINT16 uPadding;
 } RDPUDP_FEC_PAYLOAD_HEADER;
 
-typedef struct
-{
+typedef struct {
 	UINT16 cbPayloadSize;
 } RDPUDP_PAYLOAD_PREFIX;
 
-typedef struct
-{
+typedef struct {
 	UINT32 snCoded;
 	UINT32 snSourceStart;
 } RDPUDP_SOURCE_PAYLOAD_HEADER;
 
-typedef struct
-{
+typedef struct {
 	UINT32 snInitialSequenceNumber;
 	UINT16 uUpStreamMtu;
 	UINT16 uDownStreamMtu;
 } RDPUDP_SYNDATA_PAYLOAD;
 
-typedef struct
-{
+typedef struct {
 	UINT32 snAckOfAcksSeqNum;
 } RDPUDP_ACK_OF_ACKVECTOR_HEADER;
 
-typedef struct
-{
+typedef struct {
 	UINT16 uAckVectorSize;
 	UINT8 AckVectorElement[RDPUDP_ACKVECTOR_SIZE];
 } RDPUDP_ACK_VECTOR_HEADER;
 
-typedef struct
-{
+typedef struct {
 	BYTE uCorrelationId[16];
 } RDPUDP_CORRELATION_ID_PAYLOAD;
 
-typedef struct
-{
+typedef struct {
 	wStream* s;
 
 	RDPUDP_FEC_HEADER fecHeader;
@@ -601,6 +589,8 @@ static BOOL rdpudp_append_send_queue(rdpUdp* rdpudp, wStream* s)
 	rdpudp->sendQueue[rdpudp->sendQueueTail] = s;
 	rdpudp->sendQueueTail = (rdpudp->sendQueueTail + 1) % rdpudp->sendQueueCapacity;
 	rdpudp->sendQueueSize++;
+
+	return TRUE;
 }
 
 /**
@@ -667,7 +657,6 @@ static BOOL rdpudp_send_data(
 	BYTE* payloadData, int payloadSize
 )
 {
-	wStream *s;
 	RDPUDP_PDU pdu;
 
 	if (flags == 0) return FALSE;
@@ -740,6 +729,78 @@ static BOOL rdpudp_process_acks(rdpUdp* rdpudp, RDPUDP_PDU* pdu)
 			rdpudp_stop_retransmit_timer(rdpudp);
 		}
 	}
+
+	return TRUE;
+}
+
+static void rdpudp_process_data(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
+{
+	BYTE decryptedData[1024];
+	int status;
+
+	fprintf(stderr, "rdpudp_process_data\n");
+
+	/* If the connection is secured with TLS... */
+	if (rdpudp->tls)
+	{
+		/* Decrypt the payload. */
+		status = rdpudp_tls_write(rdpudp->tls, inputPdu->payloadData, inputPdu->payloadSize);
+		if (status < 0)
+		{
+			DEBUG_RDPUDP("error decrypting data");
+			return;
+		}
+
+		status = rdpudp_tls_decrypt(rdpudp->tls, decryptedData, sizeof(decryptedData));
+		if (status < 0)
+		{
+			DEBUG_RDPUDP("error decrypting data");
+			return;
+		}
+
+		/* Deliver the data. */
+		IFCALL(rdpudp->onDataReceived, rdpudp, decryptedData, status);
+
+		/* Send an ACK. */
+		UINT16 flags = RDPUDP_FLAG_ACK;
+		BYTE ackVectorElement[1];
+		UINT16 ackVectorSize = 0;
+
+		/* Update the server sequence number. */
+		rdpudp->serverSequenceNumber = inputPdu->sourcePayloadHeader.snSourceStart;
+			
+		/* Construct the ACK vector. */
+		ackVectorSize = 1;
+		ackVectorElement[0] = (DATAGRAM_RECEIVED << 6) | 0x01;
+
+		rdpudp_send_data(rdpudp, flags, ackVectorElement, ackVectorSize, NULL, 0);
+	}
+}
+
+static void rdpudp_change_state(rdpUdp* rdpudp, int state)
+{
+	rdpudp->state = state;
+
+	switch (state)
+	{
+		case RDPUDP_STATE_DISCONNECTED:
+			IFCALL(rdpudp->onDisconnected, rdpudp);
+			break;
+		case RDPUDP_STATE_CONNECTING:
+			IFCALL(rdpudp->onConnecting, rdpudp);
+			break;
+		case RDPUDP_STATE_CONNECTED:
+			IFCALL(rdpudp->onConnected, rdpudp);
+			break;
+		case RDPUDP_STATE_SECURING:
+			IFCALL(rdpudp->onSecuring, rdpudp);
+			break;
+		case RDPUDP_STATE_SECURED:
+			IFCALL(rdpudp->onSecured, rdpudp);
+			break;
+		default:
+			break;
+	}
 }
 
 static void rdpudp_secure_connection(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
@@ -770,7 +831,7 @@ static void rdpudp_secure_connection(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
 		if (rdpudp_tls_connect(rdpudp->tls))
 		{
 			fprintf(stderr, "SECURED!!!\n");
-			rdpudp->state = RDPUDP_STATE_SECURED;
+			rdpudp_change_state(rdpudp, RDPUDP_STATE_SECURED);
 		}
 
 		/* Send handshake bytes to the peer. */
@@ -806,22 +867,22 @@ static void rdpudp_connecting_state(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
 	{
 		fprintf(stderr, "SYN + ACK received\n");
 
-		rdpudp->state = RDPUDP_STATE_CONNECTED;
+		rdpudp_change_state(rdpudp, RDPUDP_STATE_CONNECTED);
 
-		/* Stop retransmissions. */
+		/* Process ACKs. */
 		rdpudp_process_acks(rdpudp, inputPdu);
 
 		/* Save the server's initial sequence number. */
 		rdpudp->serverSequenceNumber = inputPdu->syndataPayload.snInitialSequenceNumber;
 
 		/* Begin securing the connection. */
+		rdpudp_change_state(rdpudp, RDPUDP_STATE_SECURING);
+
 		rdpudp_secure_connection(rdpudp, inputPdu);
 	}
-
-	return TRUE;
 }
 
-static void rdpudp_connected_state(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
+static void rdpudp_securing_state(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
 {
 	/* If the ACK flag is set... */
 	if (inputPdu->fecHeader.uFlags & RDPUDP_FLAG_ACK)
@@ -835,15 +896,30 @@ static void rdpudp_connected_state(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
 		/* Continue securing the connection. */
 		rdpudp_secure_connection(rdpudp, inputPdu);
 	}
+}
 
-	return TRUE;
+static void rdpudp_secured_state(rdpUdp* rdpudp, RDPUDP_PDU* inputPdu)
+{
+	fprintf(stderr, "rdpudp_secured_state\n");
+
+	/* If the ACK flag is set... */
+	if (inputPdu->fecHeader.uFlags & RDPUDP_FLAG_ACK)
+	{
+		rdpudp_process_acks(rdpudp, inputPdu);
+	}
+
+	/* If the DATA flag is set... */
+	if (inputPdu->fecHeader.uFlags & RDPUDP_FLAG_DATA)
+	{
+		rdpudp_process_data(rdpudp, inputPdu);
+	}
 }
 
 static BOOL rdpudp_recv_pdu(rdpUdp* rdpudp, wStream* s)
 {
 	RDPUDP_PDU pdu;
 
-	fprintf(stderr, "rdpudp_recv_pdu: tickCount=%u\n", GetTickCount());
+	fprintf(stderr, "rdpudp_recv_pdu: tickCount=%lu\n", GetTickCount());
 
 	/* Decode the PDU. */
 	if (!rdpudp_decode_pdu(s, &pdu))
@@ -861,7 +937,14 @@ static BOOL rdpudp_recv_pdu(rdpUdp* rdpudp, wStream* s)
 			break;
 
 		case RDPUDP_STATE_CONNECTED:
-			rdpudp_connected_state(rdpudp, &pdu);
+			break;
+
+		case RDPUDP_STATE_SECURING:
+			rdpudp_securing_state(rdpudp, &pdu);
+			break;
+
+		case RDPUDP_STATE_SECURED:
+			rdpudp_secured_state(rdpudp, &pdu);
 			break;
 
 		default:
@@ -879,14 +962,14 @@ static BOOL rdpudp_recv_pdu(rdpUdp* rdpudp, wStream* s)
 	return TRUE;
 }
 
-static void rdpudp_poll(rdpUdp* rdpudp)
+static void rdpudp_timeout(rdpUdp* rdpudp)
 {
-	fprintf(stderr, "rdpudp_poll: tickCount=%u\n", GetTickCount());
+	fprintf(stderr, "rdpudp_poll: tickCount=%lu\n", GetTickCount());
 
 	switch (rdpudp->state)
 	{
 		case RDPUDP_STATE_CONNECTING:
-		case RDPUDP_STATE_CONNECTED:
+		case RDPUDP_STATE_SECURING:
 			if (rdpudp->retransmitCount++ < RDPUDP_RETRANSMIT_COUNT)
 			{
 				rdpudp_retransmit(rdpudp);
@@ -960,7 +1043,7 @@ static DWORD rdpudp_thread(LPVOID lpParameter)
 		}
 		else
 		{
-			rdpudp_poll(rdpudp);
+			rdpudp_timeout(rdpudp);
 		}
 	}
 
@@ -970,7 +1053,7 @@ static DWORD rdpudp_thread(LPVOID lpParameter)
 /**
  * Initialization
  */
-BOOL rdpudp_init(rdpUdp* rdpudp, UINT32 requestId, UINT16 requestedProtocol, BYTE* securityCookie)
+BOOL rdpudp_init(rdpUdp* rdpudp, UINT16 protocol)
 {
 	int status;
 	int sockfd;
@@ -984,12 +1067,10 @@ BOOL rdpudp_init(rdpUdp* rdpudp, UINT32 requestId, UINT16 requestedProtocol, BYT
 	/*
 	 * Only focused right now on UDP-R.
 	 */
-	if (requestedProtocol == RDPUDP_PROTOCOL_UDPFECL) return FALSE;
+	if (protocol == RDPUDP_PROTOCOL_UDPFECL) return FALSE;
 
 	/* Initialize state. */
-	rdpudp->requestId = requestId;
-	rdpudp->protocol = requestedProtocol;
-	CopyMemory(rdpudp->securityCookie, securityCookie, 16);
+	rdpudp->protocol = protocol;
 
 	rdpudp->clientSequenceNumber = 0x35B1D982;
 	rdpudp->clientReceiveWindowSize = 64;
@@ -1010,7 +1091,7 @@ BOOL rdpudp_init(rdpUdp* rdpudp, UINT32 requestId, UINT16 requestedProtocol, BYT
 	}
 
 	/* Initialize TLS/DTLS. */
-	if (requestedProtocol == RDPUDP_PROTOCOL_UDPFECR)
+	if (protocol == RDPUDP_PROTOCOL_UDPFECR)
 	{
 		rdpudp->tls = rdpudp_tls_new(rdpudp->rdp->settings);
 	}
@@ -1064,7 +1145,7 @@ BOOL rdpudp_init(rdpUdp* rdpudp, UINT32 requestId, UINT16 requestedProtocol, BYT
 
 	/* Send a SYN datagram to the server. */
 	flags = RDPUDP_FLAG_SYN;
-	if (requestedProtocol == RDPUDP_PROTOCOL_UDPFECL)
+	if (protocol == RDPUDP_PROTOCOL_UDPFECL)
 	{
 		flags |= RDPUDP_FLAG_SYNLOSSY;
 	}
@@ -1086,6 +1167,55 @@ BOOL rdpudp_init(rdpUdp* rdpudp, UINT32 requestId, UINT16 requestedProtocol, BYT
 			&rdpudp->dwThreadId);
 
 	return TRUE;
+}
+
+
+/**
+ * Read/write functions
+ */
+int rdpudp_read(rdpUdp* rdpudp, BYTE* data, int size)
+{
+	return -1;
+}
+
+int rdpudp_write(rdpUdp* rdpudp, BYTE* data, int size)
+{
+	BYTE encryptedData[1024];
+	int status;
+
+	if (rdpudp->state != RDPUDP_STATE_SECURED)
+	{
+		DEBUG_RDPUDP("state is not secured");
+		return -1;
+	}
+
+	/* If the connection is secured with TLS... */
+	if (rdpudp->tls)
+	{
+		/* Encrypt the data. */
+		status = rdpudp_tls_encrypt(rdpudp->tls, data, size);
+		if (status != size)
+		{
+			DEBUG_RDPUDP("error encrypting data (status=%d)", status);
+			return -1;
+		}
+
+		status = rdpudp_tls_read(rdpudp->tls, encryptedData, sizeof(encryptedData));
+		if (status < 0)
+		{
+			DEBUG_RDPUDP("error encrypting data (status=%d)", status);
+			return -1;
+		}
+
+		/* Send the encrypted data. */
+		if (!rdpudp_send_data(rdpudp, RDPUDP_FLAG_ACK | RDPUDP_FLAG_DATA, NULL, 0, encryptedData, status))
+		{
+			DEBUG_RDPUDP("error sending data");
+			return -1;
+		}
+	}
+
+	return size;
 }
 
 /**
@@ -1120,3 +1250,4 @@ void rdpudp_free(rdpUdp* rdpudp)
 
 	free(rdpudp);
 }
+

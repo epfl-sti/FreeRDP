@@ -220,13 +220,11 @@ BOOL rdpudp_tls_connect(rdpUdpTls* tls)
 	int status;
 	int error;
 
-	printf("calling init\n");
 	if (!rdpudp_tls_init(tls))
 	{
 		return FALSE;
 	}
 
-	printf("calling SSL_connect\n");
 	status = SSL_connect(tls->ssl);
 
 	if (status <= 0)
@@ -439,6 +437,62 @@ BOOL rdpudp_tls_disconnect(rdpUdpTls* tls)
 	return TRUE;
 }
 
+int rdpudp_tls_decrypt(rdpUdpTls* tls, BYTE* data, int length)
+{
+	int error;
+	int status;
+
+	if (!tls || !tls->ssl)
+		return -1;
+
+	status = SSL_read(tls->ssl, data, length);
+	if (status < 0)
+	{
+		error = SSL_get_error(tls->ssl, status);
+
+		switch (error)
+		{
+			case SSL_ERROR_NONE:
+				status = 0;
+				break;
+
+			default:
+				status = -1;
+				break;
+		}
+	}
+
+	return status;
+}
+
+int rdpudp_tls_encrypt(rdpUdpTls* tls, BYTE* data, int length)
+{
+	int error;
+	int status;
+
+	if (!tls || !tls->ssl)
+		return -1;
+
+	status = SSL_write(tls->ssl, data, length);
+	if (status < 0)
+	{
+		error = SSL_get_error(tls->ssl, status);
+
+		switch (error)
+		{
+			case SSL_ERROR_NONE:
+				status = 0;
+				break;
+
+			default:
+				status = -1;
+				break;
+		}
+	}
+
+	return status;
+}
+
 int rdpudp_tls_read(rdpUdpTls* tls, BYTE* data, int length)
 {
 	int error;
@@ -550,41 +604,6 @@ int rdpudp_tls_write(rdpUdpTls* tls, BYTE* data, int length)
 int rdpudp_tls_get_last_error(rdpUdpTls* tls)
 {
 	return tls->lastError;
-}
-
-int rdpudp_tls_write_all(rdpUdpTls* tls, BYTE* data, int length)
-{
-	int status;
-	int sent = 0;
-
-	do
-	{
-		status = rdpudp_tls_write(tls, &data[sent], length - sent);
-
-		if (status > 0)
-			sent += status;
-		else if (status == 0)
-			rdpudp_tls_wait_write(tls);
-
-		if (sent >= length)
-			break;
-	}
-	while (status >= 0);
-
-	if (status > 0)
-		return length;
-	else
-		return status;
-}
-
-int rdpudp_tls_wait_read(rdpUdpTls* tls)
-{
-	return freerdp_tcp_wait_read(tls->sockfd);
-}
-
-int rdpudp_tls_wait_write(rdpUdpTls* tls)
-{
-	return freerdp_tcp_wait_write(tls->sockfd);
 }
 
 static void rdpudp_tls_errors(const char *prefix)

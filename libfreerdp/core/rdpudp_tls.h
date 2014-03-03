@@ -93,15 +93,13 @@ FREERDP_API BOOL rdpudp_tls_connect(rdpUdpTls* tls);
 FREERDP_API BOOL rdpudp_tls_accept(rdpUdpTls* tls, const char* cert_file, const char* privatekey_file);
 FREERDP_API BOOL rdpudp_tls_disconnect(rdpUdpTls* tls);
 
+FREERDP_API int rdpudp_tls_decrypt(rdpUdpTls* tls, BYTE* data, int length);
+FREERDP_API int rdpudp_tls_encrypt(rdpUdpTls* tls, BYTE* data, int length);
+
 FREERDP_API int rdpudp_tls_read(rdpUdpTls* tls, BYTE* data, int length);
 FREERDP_API int rdpudp_tls_write(rdpUdpTls* tls, BYTE* data, int length);
 
 FREERDP_API int rdpudp_tls_get_last_error(rdpUdpTls* tls);
-
-FREERDP_API int rdpudp_tls_write_all(rdpUdpTls* tls, BYTE* data, int length);
-
-FREERDP_API int rdpudp_tls_wait_read(rdpUdpTls* tls);
-FREERDP_API int rdpudp_tls_wait_write(rdpUdpTls* tls);
 
 FREERDP_API int rdpudp_tls_set_alert_code(rdpUdpTls* tls, int level, int description);
 

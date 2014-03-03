@@ -23,14 +23,28 @@
 typedef struct rdp_multitransport rdpMultitransport;
 
 #include "rdp.h"
+#include "rdpudp.h"
 
 #include <freerdp/freerdp.h>
 
 #include <winpr/stream.h>
 
+/**
+ * Tunnel definition
+ */
+typedef struct {
+	rdpUdp* rdpudp;
+	UINT32 requestId;
+	UINT16 protocol;
+	BYTE securityCookie[16];
+} multitransportTunnel;
+
 struct rdp_multitransport
 {
 	rdpRdp* rdp;
+
+	void* udpRTunnel;	/* reliable tunnel */
+	void* udpLTunnel;	/* lossy tunnel */
 };
 
 int rdp_recv_multitransport_packet(rdpRdp* rdp, wStream* s);

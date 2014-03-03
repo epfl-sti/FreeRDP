@@ -44,13 +44,16 @@
 #include "rdpudp_dtls.h"
 #include "rdpudp_tls.h"
 
+#define RDPUDP_PROTOCOL_UDPFECR		0x01
+#define RDPUDP_PROTOCOL_UDPFECL		0x02
+
+typedef struct rdpudp rdpUdp;
+
 struct rdpudp
 {
 	rdpRdp* rdp;
 
-	UINT32 requestId;
 	UINT16 protocol;
-	BYTE securityCookie[16];
 
 	int sockfd;
 	rdpUdpDtls* dtls;
@@ -59,6 +62,14 @@ struct rdpudp
 	DWORD dwThreadId;
 
 	int state;
+
+	void* callbackData;
+	void (*onDisconnected)(rdpUdp* rdpudp);
+	void (*onConnecting)(rdpUdp* rdpudp);
+	void (*onConnected)(rdpUdp* rdpudp);
+	void (*onSecuring)(rdpUdp* rdpudp);
+	void (*onSecured)(rdpUdp* rdpudp);
+	void (*onDataReceived)(rdpUdp* rdpudp, BYTE* data, int size);
 
 	DWORD retransmitTimer;
 	int retransmitCount;
@@ -80,16 +91,17 @@ struct rdpudp
 	UINT32 serverSequenceNumber;
 	UINT16 serverReceiveWindowSize;
 };
-typedef struct rdpudp rdpUdp;
 
-BOOL rdpudp_init(rdpUdp* rdpUdp, UINT32 requestId, UINT16 requestedProtocol, BYTE* securityCookie);
+BOOL rdpudp_init(rdpUdp* rdpudp, UINT16 protocol);
+
+int rdpudp_read(rdpUdp* rdpudp, BYTE* data, int size);
+int rdpudp_write(rdpUdp* rdpudp, BYTE* data, int size);
 
 rdpUdp* rdpudp_new(rdpRdp* rdp);
 void rdpudp_free(rdpUdp* rdpUdp);
 
 #ifdef WITH_DEBUG_RDPUDP
-//#define DEBUG_RDPUDP(fmt, ...) DEBUG_CLASS(RDPUDP, fmt, ## __VA_ARGS__)
-#define DEBUG_RDPUDP(fmt, ...) fprintf(stderr, fmt "\n", ## __VA_ARGS__)
+#define DEBUG_RDPUDP(fmt, ...) DEBUG_CLASS(RDPUDP, fmt, ## __VA_ARGS__)
 #else
 #define DEBUG_RDPUDP(fmt, ...) DEBUG_NULL(fmt, ## __VA_ARGS__)
 #endif
