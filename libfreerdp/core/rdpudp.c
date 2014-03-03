@@ -964,7 +964,7 @@ static BOOL rdpudp_recv_pdu(rdpUdp* rdpudp, wStream* s)
 
 static void rdpudp_timeout(rdpUdp* rdpudp)
 {
-	fprintf(stderr, "rdpudp_poll: tickCount=%lu\n", GetTickCount());
+	fprintf(stderr, "rdpudp_timeout: tickCount=%lu\n", GetTickCount());
 
 	switch (rdpudp->state)
 	{
@@ -1016,6 +1016,7 @@ static DWORD rdpudp_thread(LPVOID lpParameter)
 				DWORD timeDiff = rdpudp->retransmitTimer - tickCount;
 				timeval.tv_sec = timeDiff / 1000;
 				timeval.tv_usec = (timeDiff % 1000) * 1000;
+				tv = &timeval;
 			}
 		}
 
@@ -1238,8 +1239,12 @@ void rdpudp_free(rdpUdp* rdpudp)
 {
 	if (rdpudp == NULL) return;
 
+	DEBUG_RDPUDP("rdpudp_free");
+
 	closesocket(rdpudp->sockfd);
-	WaitForSingleObject(rdpudp->hThread, INFINITE);
+	rdpudp->sockfd = -1;
+
+	WaitForSingleObject(rdpudp->hThread, 250);
 	CloseHandle(rdpudp->hThread);
 
 	rdpudp_clear_recv_queue(rdpudp);
