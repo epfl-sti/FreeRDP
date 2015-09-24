@@ -603,6 +603,9 @@ BOOL gcc_read_client_core_data(wStream* s, rdpMcs* mcs, UINT16 blockLength)
 	Stream_Read_UINT32(s, settings->KeyboardSubType); /* KeyboardSubType (4 bytes) */
 	Stream_Read_UINT32(s, settings->KeyboardFunctionKey); /* KeyboardFunctionKey (4 bytes) */
 
+	WLog_DBG(TAG, "KeyboardLayout=%x, KeyboardType=%x, KeyboardSubType=%x, KeyboardFunctionKey=%x",
+		settings->KeyboardLayout, settings->KeyboardType, settings->KeyboardSubType, settings->KeyboardFunctionKey);
+
 	Stream_Seek(s, 64); /* imeFileName (64 bytes) */
 
 	blockLength -= 128;
