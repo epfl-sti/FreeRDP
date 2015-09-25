@@ -1208,6 +1208,9 @@ BOOL rdp_read_input_capability_set(wStream* s, UINT16 length, rdpSettings* setti
 		Stream_Read_UINT32(s, settings->KeyboardType); /* keyboardType (4 bytes) */
 		Stream_Read_UINT32(s, settings->KeyboardSubType); /* keyboardSubType (4 bytes) */
 		Stream_Read_UINT32(s, settings->KeyboardFunctionKey); /* keyboardFunctionKeys (4 bytes) */
+
+		WLog_DBG(TAG, "KeyboardLayout=%x, KeyboardType=%x, KeyboardSubType=%x, KeyboardFunctionKey=%x",
+			settings->KeyboardLayout, settings->KeyboardType, settings->KeyboardSubType, settings->KeyboardFunctionKey);
 	}
 	else
 	{
