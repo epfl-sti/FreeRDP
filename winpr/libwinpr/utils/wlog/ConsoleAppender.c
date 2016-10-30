@@ -126,6 +126,7 @@ int WLog_ConsoleAppender_WriteMessage(wLog* log, wLogConsoleAppender* appender, 
 	fp = (appender->outputStream == WLOG_CONSOLE_STDERR) ? stderr : stdout;
 
 	fprintf(fp, "%s%s\n", message->PrefixString, message->TextString);
+        fflush(fp);
 #endif
 	return 1;
 }
